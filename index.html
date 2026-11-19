@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mi Uberdrive</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#1e2632;--card:#2a3442;--line:#3a4658;--tx:#e8ebf1;--mu:#9aa7ba;--sl:#86a3c8;--uber:#111317;--ind:#7cc48d;--warn:#e0b27a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{max-width:520px;margin:0 auto;padding:14px}
+header{text-align:center;font-weight:700;font-size:20px;padding:10px 0 14px;color:var(--sl)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+.hello{font-size:22px;font-weight:700;margin-bottom:12px}
+label,.mu{color:var(--mu);font-size:14px}
+input{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:#222c39;color:var(--tx);font-size:18px;margin-top:6px}
+button{font:inherit;border:0;border-radius:14px;padding:14px;width:100%;cursor:pointer;background:var(--sl);color:#14202e;font-weight:700;margin-top:8px}
+button.ghost{background:transparent;color:var(--sl);border:1px solid var(--sl)}
+button.big{padding:22px;font-size:20px;border-radius:40px}
+button.add{padding:10px;font-size:15px}
+.uber .add,.uber h3{background:var(--uber);color:#fff;border:1px solid #6b7686}.indrive .add,.indrive h3{background:var(--ind);color:#14202e}
+.big-n{font-size:34px;font-weight:800;text-align:center}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.col{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px;min-width:0}
+.col h3{margin:0;text-align:center;border-radius:10px;padding:6px;font-size:16px}
+.bd{font-size:13px;margin:10px 0}
+.bd div,.hist div,.row{display:flex;justify-content:space-between;gap:6px}
+.hist{min-height:90px;max-height:240px;overflow:auto;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:6px 0;font-size:13px;margin-bottom:8px}
+.hist div{padding:3px 0;align-items:center}
+.x{width:auto;padding:0 6px;margin:0 0 0 4px;background:none;color:var(--mu);font-size:15px}
+.ct{display:flex;justify-content:space-between;font-weight:700}
+.pend{background:#3a3326;border:1px solid var(--warn);border-radius:10px;padding:6px;font-size:12px;margin-bottom:8px}
+.pend button{padding:6px;font-size:12px;margin-top:4px;background:var(--warn)}
+.warn{background:#3a3326;border:1px solid var(--warn);color:var(--warn);border-radius:12px;padding:10px;margin:10px 0;font-size:14px}
+.ov{position:fixed;inset:0;background:#0009;display:flex;align-items:flex-end;justify-content:center;z-index:5}
+.ov[hidden]{display:none}
+.sh{background:var(--card);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:90vh;overflow:auto}
+.sh h2{margin:0 0 6px;font-size:19px}
+.tbl .row{padding:7px 0;border-bottom:1px solid var(--line)}
+.tbl .h{color:var(--sl);font-weight:700;border:0;padding-top:12px}
+.err{color:#e59a9a;font-size:14px;min-height:18px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="sheet" class="ov" hidden><div class="sh" id="sh"></div></div>
+<script>
+var KEY='uberdrive.v1',S=null;
+try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
+if(!S||!S.days)S={days:{}};
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+var pad=function(n){return String(n).padStart(2,'0')};
+var iso=function(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())};
+var TYPES={uber:['Efectivo','Billetera','Transferencia'],indrive:['Efectivo','Transferencia']};
+var NAMES={uber:'Uber',indrive:'Indrive'};
+var view='home',date=iso(new Date()),pick=null;
+function D(d){return S.days[d]||{trips:[],pending:[]}}
+function W(d){return S.days[d]||(S.days[d]={trips:[],pending:[]})}
+function tot(d,app,type){return D(d).trips.filter(function(t){return(!app||t.app===app)&&(!type||t.type===type)}).reduce(function(a,t){return a+t.amt},0)}
+function L(n){return 'L '+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function hm(ts){return new Date(ts).toLocaleTimeString('es-HN',{hour:'numeric',minute:'2-digit'})}
+function prev(d){var p=d.split('-');return iso(new Date(+p[0],+p[1]-1,+p[2]-1))}
+function longDate(d){return new Date(d+'T00:00:00').toLocaleDateString('es-HN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+var $=function(s){return document.querySelector(s)};
+function nextDay(d){var p=d.split('-');return iso(new Date(+p[0],+p[1]-1,+p[2]+1))}
+if(D(date).closed)date=nextDay(date);
+
+function render(){
+  var h='';
+  if(view==='home')h=home();else if(view==='main')h=main();else h=summary();
+  $('#app').innerHTML=h;
+}
+function home(){
+  var hr=new Date().getHours(),g=hr<12?'Buenos días':hr<19?'Buenas tardes':'Buenas noches';
+  var pd=prev(date),p=D(pd),y;
+  if(!p.trips.length)y='<div class="mu">Sin registros del día anterior.</div>';
+  else{var t=tot(pd),net=t-(p.fuel||0);
+    y='<div class="big-n">'+L(net)+'</div><div class="mu" style="text-align:center">'+(p.closed?'Ingresos '+L(t)+' − combustible '+L(p.fuel||0):'Ese día no se finalizó: aún no se descuenta el combustible')+'</div>';}
+  var has=D(date).trips.length||D(date).pending.length;
+  return '<header>Mi Uberdrive</header>'+
+  '<div class="card"><div class="hello">'+g+' 👋</div><label for="dt">Fecha</label><input type="date" id="dt" value="'+date+'"><div class="mu" style="margin-top:6px">'+longDate(date)+'</div></div>'+
+  '<div class="card"><div class="mu" style="margin-bottom:6px">Ganancias netas del día anterior</div>'+y+'</div>'+
+  '<button class="big" data-a="start">'+(has?'Continuar Día':'Iniciar Día')+'</button>'+
+  '<button class="ghost" data-a="sum">Resumen del Día</button>';
+}
+function col(app){
+  var d=D(date),items=d.trips.filter(function(t){return t.app===app});
+  var bd=TYPES[app].map(function(ty){return '<div><span>'+ty+'</span><b>'+L(tot(date,app,ty))+'</b></div>'}).join('');
+  var pend='';
+  if(app==='uber'&&d.pending.length)pend='<div class="pend"><b>Pendientes</b>'+d.pending.map(function(p){return '<div class="row"><span>'+L(p.amt)+' · '+hm(p.ts)+'</span></div><button data-a="addp" data-id="'+p.id+'">Agregar ahora</button>'}).join('')+'</div>';
+  var hist=items.length?items.slice().reverse().map(function(t){return '<div><span>'+hm(t.ts)+' '+t.type.slice(0,4)+'.</span><span><b>'+L(t.amt)+'</b><button class="x" data-a="del" data-id="'+t.id+'" aria-label="Borrar">✕</button></span></div>'}).join(''):'<div class="mu">Sin viajes</div>';
+  return '<section class="col '+app+'"><h3>'+NAMES[app]+'</h3><button class="add" data-a="add" data-app="'+app+'">Añadir Viaje +</button><div class="bd">'+bd+'</div>'+pend+'<div class="hist">'+hist+'</div><div class="ct"><span>Total</span><span>'+L(tot(date,app))+'</span></div></section>';
+}
+function main(){
+  var d=D(date);
+  return '<header>Mi Uberdrive · '+date.split('-').reverse().join('/')+'</header>'+
+  '<div class="card"><div class="mu" style="text-align:center">Total del día</div><div class="big-n">'+L(tot(date))+'</div>'+(d.closed?'<div class="mu" style="text-align:center">Día finalizado ✓</div>':'')+'</div>'+
+  '<div class="cols">'+col('uber')+col('indrive')+'</div>'+
+  '<button class="ghost" data-a="sum" style="margin-top:12px">Resumen del Día</button>'+
+  '<button data-a="fin">Finalizar Día</button>'+
+  '<button class="ghost" data-a="home">‹ Inicio</button>';
+}
+function summary(){
+  var d=D(date),rows='';
+  ['uber','indrive'].forEach(function(app){
+    rows+='<div class="row h"><span>'+NAMES[app]+'</span></div>';
+    TYPES[app].forEach(function(ty){rows+='<div class="row"><span>'+ty+'</span><span>'+L(tot(date,app,ty))+'</span></div>'});
+    rows+='<div class="row"><b>Total '+NAMES[app]+'</b><b>'+L(tot(date,app))+'</b></div>';
+  });
+  rows+='<div class="row h"><span>Día</span></div><div class="row"><b>Total general</b><b>'+L(tot(date))+'</b></div>';
+  if(d.closed){var net=tot(date)-d.fuel;
+    rows+='<div class="row"><span>Combustible</span><span>'+L(d.fuel)+'</span></div><div class="row"><span>Kilómetros</span><span>'+d.km+' km</span></div><div class="row"><span>Gasto por km</span><span>'+L(d.fuel/d.km)+'</span></div><div class="row"><b>Ganancias del día</b><b>'+L(net)+'</b></div>';}
+  var w=d.pending.length?'<div class="warn">Tienes '+d.pending.length+' pago(s) de billetera Uber pendientes ('+L(d.pending.reduce(function(a,p){return a+p.amt},0))+'). No cuentan en los totales hasta agregarlos.</div>':'';
+  return '<header>Resumen · '+date.split('-').reverse().join('/')+'</header><div class="card tbl">'+rows+'</div>'+w+
+  '<button data-a="xls" data-d="'+date+'">Descargar Excel del día</button><button class="ghost" data-a="'+(view==='sum'&&D(date).trips.length?'start':'home')+'">‹ Volver</button>';
+}
+function open(h){$('#sh').innerHTML=h;$('#sheet').hidden=false}
+function close(){$('#sheet').hidden=true}
+function opts(app){
+  open('<h2>Añadir viaje '+NAMES[app]+'</h2><div class="mu">¿Cómo pagó el pasajero?</div>'+TYPES[app].map(function(t){return '<button data-a="pick" data-app="'+app+'" data-type="'+t+'">'+t+'</button>'}).join('')+'<button class="ghost" data-a="close">Cancelar</button>');
+}
+function amtSheet(app,type){
+  pick={app:app,type:type};
+  var b=type==='Billetera'?'<button data-a="sv" data-m="now">Agregar ahora</button><button class="ghost" data-a="sv" data-m="later">Agregar más tarde</button>':'<button data-a="sv" data-m="now">Guardar</button>';
+  open('<h2>'+NAMES[app]+' · '+type+'</h2><label for="amt">Monto (L)</label><input id="amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00"><div class="err" id="err"></div>'+b+'<button class="ghost" data-a="close">Cancelar</button>');
+  setTimeout(function(){var i=$('#amt');if(i)i.focus()},50);
+}
+function finSheet(){
+  var d=D(date);
+  var w=d.pending.length?'<div class="warn">⚠️ Tienes '+d.pending.length+' pago(s) de billetera Uber sin agregar. Agrégalos antes de finalizar para que todo cuadre.</div><button class="ghost" data-a="close">Ir a agregarlos</button>':'';
+  open('<h2>Finalizar día</h2>'+w+'<label for="fuel">Total gastado en combustible (L)</label><input id="fuel" type="number" inputmode="decimal" min="0" step="0.01" value="'+(d.fuel!=null?d.fuel:'')+'"><label for="km" style="display:block;margin-top:10px">Kilómetros recorridos</label><input id="km" type="number" inputmode="decimal" min="0" step="0.1" value="'+(d.km||'')+'"><div class="err" id="err"></div><button data-a="calc">Calcular</button><button class="ghost" data-a="close">Cancelar</button>');
+}
+function result(fd){
+  var d=D(fd),net=tot(fd)-d.fuel;
+  var w=d.pending.length?'<div class="warn">⚠️ Aún tienes '+d.pending.length+' pago(s) de billetera pendientes. Agrégalos y vuelve a finalizar para que los números cuadren.</div>':'';
+  open('<h2>Día finalizado ✓</h2><div class="mu">Ganancias totales del día</div><div class="big-n">'+L(net)+'</div><div class="mu" style="text-align:center">Uber + Indrive − combustible</div><div class="card" style="margin-top:12px"><div class="row"><span>Gasto por kilómetro</span><b>'+L(d.fuel/d.km)+'</b></div></div>'+w+'<button data-a="xls" data-d="'+fd+'">Descargar Excel del día</button><button class="ghost" data-a="close">Cerrar</button>');
+}
+async function xls(dd){
+  var date=dd||window.date,d=D(date),aoa=[['Fecha','Hora','App','Tipo','Monto (L)']];
+  d.trips.forEach(function(t){aoa.push([date,hm(t.ts),NAMES[t.app],t.type,t.amt])});
+  var res=[['Concepto','Monto (L)']];
+  ['uber','indrive'].forEach(function(a){TYPES[a].forEach(function(ty){res.push([NAMES[a]+' '+ty,tot(date,a,ty)])});res.push(['Total '+NAMES[a],tot(date,a)])});
+  res.push(['Total general',tot(date)]);
+  if(d.closed)res.push(['Combustible',d.fuel],['Kilómetros',d.km],['Gasto por km',d.fuel/d.km],['Ganancias del día',tot(date)-d.fuel]);
+  d.pending.forEach(function(p){res.push(['Pendiente billetera Uber ('+hm(p.ts)+')',p.amt])});
+  var data,name='MiUberdrive_'+date;
+  if(window.XLSX){var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),'Viajes');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(res),'Resumen');data=XLSX.write(wb,{type:'array',bookType:'xlsx'});name+='.xlsx';}
+  else{data='\ufeff'+aoa.concat([[]],res).map(function(r){return r.join(',')}).join('\n');name+='.csv';}
+  try{
+    var dl=window.claude&&claude.use?await claude.use('downloads'):null;
+    if(dl)await dl.save({filename:name,data:data});
+    else{var bl=new Blob([data],{type:name.slice(-4)==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'text/csv'}),u=URL.createObjectURL(bl),an=document.createElement('a');an.href=u;an.download=name;document.body.appendChild(an);an.click();an.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000)}
+  }catch(e){if(!e||e.code!=='declined')alert('No se pudo generar el archivo.')}
+}
+document.addEventListener('change',function(e){if(e.target.id==='dt'){date=e.target.value||iso(new Date());render()}});
+$('#sheet').addEventListener('click',function(e){if(e.target.id==='sheet')close()});
+document.addEventListener('click',function(e){
+  var el=e.target.closest('[data-a]');if(!el)return;
+  var a=el.dataset.a,d;
+  if(a==='start'){view='main';render();window.scrollTo(0,0)}
+  else if(a==='home'){view='home';render()}
+  else if(a==='sum'){view='sum';render();window.scrollTo(0,0)}
+  else if(a==='add')opts(el.dataset.app);
+  else if(a==='pick')amtSheet(el.dataset.app,el.dataset.type);
+  else if(a==='close')close();
+  else if(a==='sv'){
+    var v=parseFloat($('#amt').value);
+    if(!(v>0)){$('#err').textContent='Escribe un monto mayor a 0.';return}
+    d=W(date);
+    if(el.dataset.m==='later')d.pending.push({id:uid(),amt:v,ts:Date.now()});
+    else d.trips.push({id:uid(),app:pick.app,type:pick.type,amt:v,ts:Date.now()});
+    save();close();render();
+  }
+  else if(a==='addp'){d=W(date);var i=d.pending.findIndex(function(p){return p.id===el.dataset.id});
+    if(i>-1){var p=d.pending.splice(i,1)[0];d.trips.push({id:uid(),app:'uber',type:'Billetera',amt:p.amt,ts:Date.now()});save();render()}}
+  else if(a==='del')open('<h2>¿Borrar este viaje?</h2><button data-a="delok" data-id="'+el.dataset.id+'">Sí, borrar</button><button class="ghost" data-a="close">Cancelar</button>');
+  else if(a==='delok'){d=W(date);d.trips=d.trips.filter(function(t){return t.id!==el.dataset.id});save();close();render()}
+  else if(a==='fin')finSheet();
+  else if(a==='calc'){
+    var f=parseFloat($('#fuel').value),k=parseFloat($('#km').value);
+    if(!(f>=0)||!(k>0)){$('#err').textContent='Escribe el combustible y los kilómetros (mayor a 0).';return}
+    d=W(date);d.fuel=f;d.km=k;d.closed=true;save();var fd=date;date=nextDay(date);view='home';render();window.scrollTo(0,0);result(fd);
+  }
+  else if(a==='xls')xls(el.dataset.d);
+});
+render();
+</script>
+</body>
+</html>
